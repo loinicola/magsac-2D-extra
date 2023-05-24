@@ -75,7 +75,71 @@ namespace magsac
 			}
 		};
 
-		
+		// This is the estimator class for estimating a 2D rigid transformation matrix between two set of points. 
+		template<class _MinimalSolverEngine,  // The solver used for estimating the model from a minimal sample
+			class _NonMinimalSolverEngine> // The solver used for estimating the model from a non-minimal sample
+			class Robust2DRigidTransformationEstimator :
+			public gcransac::estimator::Robust2DRigidTransformationEstimator<_MinimalSolverEngine, _NonMinimalSolverEngine>
+		{
+		public:
+			using gcransac::estimator::Robust2DRigidTransformationEstimator<_MinimalSolverEngine, _NonMinimalSolverEngine>::residual;
+
+			Robust2DRigidTransformationEstimator() :
+				gcransac::estimator::Robust2DRigidTransformationEstimator<_MinimalSolverEngine, _NonMinimalSolverEngine>()
+			{}
+
+			// Calculating the residual which is used for the MAGSAC score calculation.
+			// Since symmetric epipolar distance is usually more robust than Sampson-error.
+			// we are using it for the score calculation.
+			inline double residualForScoring(const cv::Mat& point_,
+				const gcransac::Model& model_) const
+			{
+				return residual(point_, model_.descriptor);
+			}
+
+			static constexpr double getSigmaQuantile()
+			{
+				return 3.64;
+			}
+
+			static constexpr size_t getDegreesOfFreedom()
+			{
+				return 4;
+			}
+
+			static constexpr double getGammaFunction()
+			{
+				return 1.0;
+			}
+
+			static constexpr double getC()
+			{
+				return 0.25;
+			}
+
+			// Calculating the upper incomplete gamma value of (DoF - 1) / 2 with k^2 / 2.
+			static constexpr double getUpperIncompleteGammaOfK()
+			{
+				return 0.0036572608340910764;
+			}
+
+			// Calculating the lower incomplete gamma value of (DoF + 1) / 2 with k^2 / 2.
+			static constexpr double getLowerIncompleteGammaOfK()
+			{
+				return 1.3012265540498875;
+			}
+
+			static constexpr double getChiSquareParamCp()
+			{
+				return 1.0 / (4.0 * getGammaFunction());
+			}
+
+			static constexpr bool doesNormalizationForNonMinimalFitting()
+			{
+				return true;
+			}
+		};
+
 		// This is the estimator class for estimating a fundamental matrix between two images. 
 		template<class _MinimalSolverEngine,  // The solver used for estimating the model from a minimal sample
 			class _NonMinimalSolverEngine> // The solver used for estimating the model from a non-minimal sample
@@ -609,5 +673,10 @@ namespace magsac
 		typedef estimator::RigidTransformationEstimator<gcransac::estimator::solver::RigidTransformationSVDBasedSolver, // The solver used for fitting a model to a minimal sample
 			gcransac::estimator::solver::RigidTransformationSVDBasedSolver> // The solver used for fitting a model to a non-minimal sample
 			DefaultRigidTransformationEstimator;
+
+		// The default estimator for 2D rigid transformation fitting
+		typedef estimator::Robust2DRigidTransformationEstimator<gcransac::estimator::solver::Robust2DRigidTransformationSVDBasedSolver, // The solver used for fitting a model to a minimal sample
+			gcransac::estimator::solver::Robust2DRigidTransformationSVDBasedSolver> // The solver used for fitting a model to a non-minimal sample
+			DefaultRobust2DRigidTransformationEstimator;
 	}
 }

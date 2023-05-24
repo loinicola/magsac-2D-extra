@@ -92,15 +92,15 @@ class CMakeBuild(build_ext):
         copymode(src_file, dest_file)
 		
 setup(
-    name='pymagsac',
+    name='pymagsac_extra',
     version='0.3',
     author='Daniel Barath, Dmytro Mishkin',
     author_email='barath.daniel@sztaki.hu',
-    description='MAGSAC and MAGSAC++',
-    long_description='Robust estimator for H, F and E estimation.',
+    description='MAGSAC and MAGSAC++ with 2D rigid transformation',
+    long_description='Robust estimator for H, F and E estimation. Extended for faster and more robust 2D rigid transformation.',
     packages=find_packages('src'),
     package_dir={'':'src'},
-    ext_modules=[CMakeExtension('pymagsac/pymagsac')],
+    ext_modules=[CMakeExtension('pymagsac_extra/pymagsac_extra')],
     cmdclass=dict(build_ext=CMakeBuild),
     #test_suite='tests',
     zip_safe=False,

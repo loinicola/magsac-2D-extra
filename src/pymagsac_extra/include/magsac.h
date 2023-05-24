@@ -230,10 +230,16 @@ bool MAGSAC<DatumType, ModelEstimator>::run(
 				
 		// Sample a minimal subset
 		std::vector<gcransac::Model> models; // The set of estimated models
+
+		/*
 		size_t unsuccessful_model_generations = 0; // The number of unsuccessful model generations
+
 		// Try to select a minimal sample and estimate the implied model parameters
+
 		while (++unsuccessful_model_generations < max_unsuccessful_model_generations)
 		{
+		*/
+
 			// Get a minimal sample randomly
 			if (!sampler_.sample(pool, // The index pool from which the minimal sample can be selected
 				minimal_sample.get(), // The minimal sample
@@ -247,18 +253,27 @@ bool MAGSAC<DatumType, ModelEstimator>::run(
 				continue;
 
 			// Estimate the model from the minimal sample
- 			if (estimator_.estimateModel(points_, // All data points
+			
+ 			if (!estimator_.estimateModel(points_, // All data points
 				minimal_sample.get(), // The selected minimal sample
-				&models)) // The estimated models
-				break; 
-		}         
+				&models))// The estimated models
+				continue;
+				
+		/*
+		}  
 
 		// If the method was not able to generate any usable models, break the cycle.
 		iteration += unsuccessful_model_generations - 1;
+		*/
 
 		// Select the so-far-the-best from the estimated models
+
+		/*
 		for (const auto &model : models)
 		{
+		*/
+
+			const auto &model = models[0];
 			ModelScore score; // The score of the current model
 			gcransac::Model refined_model; // The refined model parameters
 
@@ -293,7 +308,10 @@ bool MAGSAC<DatumType, ModelEstimator>::run(
 				so_far_the_best_score = score; // Update the best model's score
 				max_iteration = MIN(max_iteration, last_iteration_number); // Update the max iteration number, but do not allow to increase
 			}
+
+		/*
 		}
+		*/
 
 		// Update the time parameters if a time limit is set
 		if (desired_fps > -1)
@@ -316,7 +334,7 @@ bool MAGSAC<DatumType, ModelEstimator>::run(
 	obtained_model_ = so_far_the_best_model;
 	iteration_number_ = iteration;
 	model_score_ = so_far_the_best_score;
-
+	// fprintf(stderr, "%d iterations, %d inliers, %f score\n", iteration, so_far_the_best_score.inlier_number, so_far_the_best_score.score);
 	return so_far_the_best_score.score > 0;
 }
 
@@ -743,8 +761,8 @@ bool MAGSAC<DatumType, ModelEstimator>::sigmaConsensusPlusPlus(
 	// Occupy the memory to avoid doing it inside the calculation possibly multiple times
 	sigma_weights.reserve(possible_inlier_number);
 
-	// Calculate 2 * \sigma_{max}^2 a priori
-	const double squared_sigma_max_2 = current_maximum_sigma * current_maximum_sigma * 2.0;
+	// Calculate 1/(2 * \sigma_{max}^2) a priori
+	const double inverse_squared_sigma_max_2 = 1 /(current_maximum_sigma * current_maximum_sigma * 2.0);
 	// Divide C * 2^(DoF - 1) by \sigma_{max} a priori
 	const double one_over_sigma = C_times_two_ad_dof / current_maximum_sigma;
 	// Calculate the weight of a point with 0 residual (i.e., fitting perfectly) a priori
@@ -815,7 +833,7 @@ bool MAGSAC<DatumType, ModelEstimator>::sigmaConsensusPlusPlus(
 				// Calculate the squared residual
 				const double squared_residual = residual * residual;
 				// Get the position of the gamma value in the lookup table
-				size_t x = round(precision_of_stored_gammas * squared_residual / squared_sigma_max_2);
+				size_t x = round(precision_of_stored_gammas * squared_residual * inverse_squared_sigma_max_2);
 				// Put the index of the point into the vector of points used for the least squares fitting
 				sigma_inliers.emplace_back(idx);
 
