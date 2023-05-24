@@ -20,6 +20,169 @@
 
 #include <gflags/gflags.h>
 
+int findRobust2DRigidTransformation_(
+    std::vector<double>& correspondences,
+    std::vector<bool>& inliers,
+    std::vector<double>& F,
+    std::vector<double>& inlier_probabilities,
+    int sampler_id,
+    bool update_sampling,
+    bool use_magsac_plus_plus,
+    double sigma_max,
+    double conf,
+    //double neighborhood_size,
+    int min_iters,
+    int max_iters,
+    bool check_edges_similarity,
+    int edge_similarity_threshold,
+    bool check_min_edges_length,
+    double min_edges_length_threshold,
+    bool apply_rotation_boundaries,
+    std::vector<float>& rotation_boundaries,
+    bool apply_translation_boundary,
+    std::vector<float>& translation_init,
+    float translation_boundary,
+    int core_num,
+    int partition_num)
+{
+    magsac::utils::DefaultRobust2DRigidTransformationEstimator estimator; // The robust rigid transformation estimator class containing the
+    gcransac::Robust2DRigidTransformation model; // The estimated model
+
+    estimator.setCheckEdgesSimilarity(check_edges_similarity);
+    estimator.setEdgesSimilarityThreshold(edge_similarity_threshold);
+
+    estimator.setCheckMinEdgesLength(check_min_edges_length);
+    estimator.setMinEdgesLengthThreshold(min_edges_length_threshold);
+
+    estimator.setApplyRotationBoundaries(apply_rotation_boundaries);
+    estimator.setRotationBoundaries(rotation_boundaries);
+
+    estimator.setApplyTranslationBoundary(apply_translation_boundary);
+    estimator.setTranslationInit(translation_init);
+    estimator.setTranslationBoundary(translation_boundary);
+
+
+    MAGSAC<cv::Mat, magsac::utils::DefaultRobust2DRigidTransformationEstimator>* magsac;
+    if (use_magsac_plus_plus)
+        magsac = new MAGSAC<cv::Mat, magsac::utils::DefaultRobust2DRigidTransformationEstimator>(
+            MAGSAC<cv::Mat, magsac::utils::DefaultRobust2DRigidTransformationEstimator>::MAGSAC_PLUS_PLUS);
+    else
+        magsac = new MAGSAC<cv::Mat, magsac::utils::DefaultRobust2DRigidTransformationEstimator>(
+            MAGSAC<cv::Mat, magsac::utils::DefaultRobust2DRigidTransformationEstimator>::MAGSAC_ORIGINAL);
+    magsac->setMaximumThreshold(sigma_max); // The maximum noise scale sigma allowed
+    magsac->setCoreNumber(core_num); // The number of cores used to speed up sigma-consensus
+    magsac->setPartitionNumber(partition_num); // The number partitions used for speeding up sigma consensus. As the value grows, the algorithm become slower and, usually, more accurate.
+    magsac->setIterationLimit(max_iters);
+	magsac->setMinimumIterationNumber(min_iters);
+    magsac->setUpdateSampling(update_sampling); // Update sampling (in original MAGSAC no update is performed but it's probably a bug)
+
+    int num_tents = correspondences.size() / 4;
+    cv::Mat points(num_tents, 4, CV_64F, &correspondences[0]);
+	
+	// Initialize the samplers
+	// The main sampler is used for sampling in the main RANSAC loop
+	typedef gcransac::sampler::Sampler<cv::Mat, size_t> AbstractSampler;
+	std::unique_ptr<AbstractSampler> main_sampler;
+	if (sampler_id == 0) // Initializing a RANSAC-like uniformly random sampler
+		main_sampler = std::unique_ptr<AbstractSampler>(new gcransac::sampler::UniformSampler(&points));
+	else if (sampler_id == 1)  // Initializing a PROSAC sampler. This requires the points to be ordered according to the quality.
+		main_sampler = std::unique_ptr<AbstractSampler>(new gcransac::sampler::ProsacSampler(&points, estimator.sampleSize()));
+	else if (sampler_id == 2)  // Initializing a NAPSAC sampler. This requires the points to be ordered according to the quality.
+	{
+        fprintf(stderr, "the sampler Progressive NAPSAC is not compatible with rigid transformation estimation.");
+        return 0;
+        
+        /*typedef neighborhood::NeighborhoodGraph<cv::Mat> AbstractNeighborhood;
+        std::unique_ptr<AbstractNeighborhood> neighborhood_graph;
+                neighborhood_graph = std::unique_ptr<AbstractNeighborhood>(
+                    new neighborhood::FlannNeighborhoodGraph(&emptyPoints, neighborhood_size));
+                    
+		main_sampler = std::unique_ptr<AbstractSampler>(new sampler::NapsacSampler<neighborhood::FlannNeighborhoodGraph>(
+			&points, dynamic_cast<neighborhood::FlannNeighborhoodGraph *>(neighborhood_graph.get())));*/
+	} 
+	else if (sampler_id == 3)
+    {
+        main_sampler = std::unique_ptr<AbstractSampler>(new gcransac::sampler::ImportanceSampler(&points, 
+            inlier_probabilities,
+            estimator.sampleSize()));
+            
+        if (!main_sampler->isInitialized())
+        {
+            fprintf(stderr, "An error occured when initializing the NG-RANSAC sampler.");
+            return 0;
+        }
+    } else if (sampler_id == 4)
+    {
+		double variance = 0.1;
+        double max_prob = 0;
+        for (const auto &prob : inlier_probabilities)
+            max_prob = MAX(max_prob, prob);
+        for (auto &prob : inlier_probabilities)
+            prob /= max_prob;
+		main_sampler = std::unique_ptr<AbstractSampler>(new gcransac::sampler::AdaptiveReorderingSampler(&points, 
+            inlier_probabilities,
+            estimator.sampleSize(),
+            variance));
+
+        if (!main_sampler->isInitialized())
+        {
+            fprintf(stderr, "An error occured when initializing the AR-Sampler.");
+            return 0;
+        }
+	}
+	else
+	{
+		fprintf(stderr, "Unknown sampler identifier: %d. The accepted samplers are 0 (uniform sampling), 1 (PROSAC sampling), 2 (P-NAPSAC sampling), 3 (NG-RANSAC sampler), 4 (AR-Sampler)\n",
+			sampler_id);
+		return 0;
+	}
+
+    ModelScore score;
+    bool success = magsac->run(points, // The data points
+        conf, // The required confidence in the results
+        estimator, // The used estimator
+        *main_sampler.get(), // The sampler used for selecting minimal samples in each iteration
+        model, // The estimated model
+        max_iters, // The number of iterations
+        score); // The score of the estimated model
+    inliers.resize(num_tents);
+    if (!success) {
+        for (auto pt_idx = 0; pt_idx < points.rows; ++pt_idx) {
+            inliers[pt_idx] = false;
+        }
+        // FIXME: leave 16 or make it 9 (3x3 matrix)?
+        F.resize(9);
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                F[i * 3 + j] = 0;
+            }
+        }
+        return 0;
+    }
+    int num_inliers = 0;
+    for (auto pt_idx = 0; pt_idx < points.rows; ++pt_idx) {
+        const int is_inlier = estimator.residual(points.row(pt_idx), model.descriptor) <= sigma_max;
+        inliers[pt_idx] = (bool)is_inlier;
+        num_inliers += is_inlier;
+    }
+    // FIXME: leave 16 or make it 9 (3x3 matrix)?
+    F.resize(9);
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            F[i * 3 + j] = (double)model.descriptor(i, j);
+        }
+    }
+    
+	// It is ugly: the unique_ptr does not check for virtual descructors in the base class.
+	// Therefore, the derived class's objects are not deleted automatically. 
+	// This causes a memory leaking. I hate C++.
+	AbstractSampler *sampler_ptr = main_sampler.release();
+	delete sampler_ptr;
+
+    return num_inliers;    
+}
+
+
 int findRigidTransformation_(
     std::vector<double>& correspondences,
     std::vector<bool>& inliers,

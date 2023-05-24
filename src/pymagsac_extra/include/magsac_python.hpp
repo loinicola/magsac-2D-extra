@@ -63,6 +63,30 @@ int findEssentialMatrix_(std::vector<double>& correspondences,
     int max_iters,
     int partition_num);
 
+int findRobust2DRigidTransformation_(
+    std::vector<double>& correspondences,
+    std::vector<bool>& inliers,
+    std::vector<double>& F,
+    std::vector<double>& inlier_probabilities,
+    int sampler_id,
+    bool update_sampling,
+    bool use_magsac_plus_plus,
+    double sigma_max,
+    double conf,
+    //double neighborhood_size,
+    int min_iters,
+    int max_iters,
+    bool check_edges_similarity,
+    int edge_similarity_threshold,
+    bool check_min_edges_length,
+    double min_edges_length_threshold,
+    bool apply_rotation_boundaries,
+    std::vector<float>& rotation_boundaries,
+    bool apply_translation_boundary,
+    std::vector<float>& translation_init,
+    float translation_boundary,
+    int core_num,
+    int partition_num);
     
 int findRigidTransformation_(
     std::vector<double>& correspondences,

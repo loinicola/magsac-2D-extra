@@ -3,6 +3,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+.vscode/
+*.so
+
 # User-specific files
 *.rsuser
 *.suo
@@ -347,3 +350,7 @@ MigrationBackup/
 # Specific to this report
 results/*
 build
+dist/
+src/*.egg-info/
+src/*.egg-info/*
+src/pymagsac_extra.egg-info

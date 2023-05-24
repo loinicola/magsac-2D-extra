@@ -58,6 +58,7 @@ set(EIGEN_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIR})
 # Find OpenMP
 # ==============================================================================
 find_package(OpenMP)
+message( STATUS "> USE_OPENMP:   ${USE_OPENMP}" )
 if (USE_OPENMP)
 	if(NOT OPENMP_FOUND)
 		message(FATAL_ERROR "OPENMP not found.")
@@ -69,7 +70,7 @@ endif (USE_OPENMP)
 # ==============================================================================
 # Includes
 # ==============================================================================
-SET(SOURCE_DIR "src/pymagsac")
+SET(SOURCE_DIR "src/pymagsac_extra")
 
 include_directories (
 	${PROJECT_SOURCE_DIR}/graph-cut-ransac/src/pygcransac/include
@@ -121,13 +122,13 @@ file(GLOB_RECURSE SRCS_MAGSAC
 # Generate python module
 add_subdirectory(lib/pybind11)
 
-pybind11_add_module(pymagsac 
+pybind11_add_module(pymagsac_extra
 	${SOURCE_DIR}/src/bindings.cpp 
 	${SOURCE_DIR}/src/magsac_python.cpp
 	${HDRS_MAGSAC} 
 	${SRCS_MAGSAC})
 
-target_link_libraries(pymagsac PRIVATE  
+target_link_libraries(pymagsac_extra PRIVATE  
 	${OpenCV_LIBS} 
 	Eigen3::Eigen
 	GraphCutRANSAC

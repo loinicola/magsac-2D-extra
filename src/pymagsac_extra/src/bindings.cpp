@@ -80,6 +80,160 @@ py::tuple adaptiveInlierSelection(
 
 }
 
+py::tuple findRobust2DRigidTransformation(
+	py::array_t<double>  correspondences_,
+	py::array_t<double>  probabilities_,
+	int sampler,
+    bool update_sampling,
+    bool use_magsac_plus_plus,
+    double sigma_th,
+    double conf,
+    int min_iters,
+    int max_iters,
+    bool check_edges_similarity,
+    double edges_similarity_threshold,
+    bool check_min_edges_length,
+    double min_edges_length_threshold,
+    bool apply_rotation_boundaries,
+    py::array_t<float> rotation_boundaries_,
+    bool apply_translation_boundary,
+    py::array_t<float> translation_init_,
+    float translation_boundary,
+    int core_num,
+    int partition_num,
+    bool reduced_matrix)
+{
+	py::buffer_info buf1 = correspondences_.request();
+	size_t NUM_TENTS = buf1.shape[0];
+	size_t DIM = buf1.shape[1];
+
+	if (DIM != 4) {
+		throw std::invalid_argument("correspondences should be an array with dims [n,4], n>=2.");
+	}
+    if (NUM_TENTS < 2) {
+        throw std::invalid_argument("correspondences should be an array with dims [n,4], n>=2.");
+    }
+
+    if (check_edges_similarity && (edges_similarity_threshold > 1.0 || edges_similarity_threshold <= 0.0)) {
+        throw std::invalid_argument("edges_similarity_threshold should be >0 and <=1.");
+    }
+
+    if (check_min_edges_length && (min_edges_length_threshold <= 0.0)) {
+        throw std::invalid_argument("min_edge_length_threshold should be >0.");
+    }
+
+    py::buffer_info buf_rotation_boundaries = rotation_boundaries_.request();
+    size_t n_rotation_boundaries = buf_rotation_boundaries.shape[0];
+    std::vector<float> rotation_boundaries;
+
+    if (apply_rotation_boundaries) {
+        if (n_rotation_boundaries != 2) {
+            throw std::invalid_argument("rotation_boundaries should be [min,max] with min<max.");
+        }
+        float* ptr_rotation_boundaries = (float*)buf_rotation_boundaries.ptr;
+        rotation_boundaries.assign(ptr_rotation_boundaries, ptr_rotation_boundaries + buf_rotation_boundaries.size);
+        if (rotation_boundaries[0] >= rotation_boundaries[1]) {
+            throw std::invalid_argument("rotation_boundaries should be [min,max] with min<max.");
+        }
+    } else {
+        rotation_boundaries = { -M_PI_2, M_PI_2 };
+    }
+
+    if (apply_translation_boundary) {
+        if (translation_boundary <= 0.0f) {
+            throw std::invalid_argument("translation_boundary should be > 0.");
+        }
+    } else {
+        translation_boundary = 999999.99f;
+    }
+
+    py::buffer_info buf_translation_init = translation_init_.request();
+    size_t n_translation_init = buf_translation_init.shape[0];
+    std::vector<float> translation_init;
+
+    if (apply_translation_boundary) {
+        if (n_translation_init != 2) {
+            throw std::invalid_argument("translation_init should be [x,y].");
+        }
+        float* ptr_translation_init = (float*)buf_translation_init.ptr;
+        translation_init.assign(ptr_translation_init, ptr_translation_init + buf_translation_init.size);
+    } else {
+        translation_init = { 0.0f, 0.0f};
+    }
+
+    double* ptr1 = (double*)buf1.ptr;
+    std::vector<double> correspondences;
+    correspondences.assign(ptr1, ptr1 + buf1.size);
+
+    std::vector<double> T(9);
+    std::vector<bool> inliers(NUM_TENTS);
+
+    std::vector<double> probabilities;
+    if (sampler == 3 || sampler == 4)
+    {
+        py::buffer_info buf_prob = probabilities_.request();
+        double* ptr_prob = (double*)buf_prob.ptr;
+        if (buf_prob.size != NUM_TENTS) {
+            throw std::invalid_argument("the selected sampler requires probabilities with same size as correspondences.");
+        }
+        probabilities.assign(ptr_prob, ptr_prob + buf_prob.size);        
+    } else if (sampler == 2) {
+        throw std::invalid_argument("the sampler Progressive NAPSAC is not compatible with rigid transformation estimation.");
+    }
+
+    int num_inl = findRobust2DRigidTransformation_(
+        correspondences,
+        inliers,
+        T,
+        probabilities,
+        sampler,
+        update_sampling,
+        use_magsac_plus_plus,
+        sigma_th,
+        conf,
+        min_iters,
+        max_iters,
+        check_edges_similarity,
+        edges_similarity_threshold,
+        check_min_edges_length,
+        min_edges_length_threshold,
+        apply_rotation_boundaries,
+        rotation_boundaries,
+        apply_translation_boundary,
+        translation_init,
+        translation_boundary,
+        core_num,
+        partition_num);
+
+    py::array_t<bool> inliers_ = py::array_t<bool>(NUM_TENTS);
+    py::buffer_info buf3 = inliers_.request();
+    bool* ptr3 = (bool*)buf3.ptr;
+    for (size_t i = 0; i < NUM_TENTS; i++)
+        ptr3[i] = inliers[i];
+    if (num_inl == 0) {
+        return py::make_tuple(pybind11::cast<pybind11::none>(Py_None), inliers_);
+    }
+
+    if (reduced_matrix) {
+        py::array_t<double> T_ = py::array_t<double>({ 3,3 });
+        py::buffer_info buf2 = T_.request();
+        double* ptr2 = (double*)buf2.ptr;
+        for (size_t i = 0; i < 9; i++)
+            ptr2[i] = T[i];
+        return py::make_tuple(T_, inliers_);
+
+    } else {
+        py::array_t<double> T_ = py::array_t<double>({ 4,4 });
+        py::buffer_info buf2 = T_.request();
+        double* ptr2 = (double*)buf2.ptr;
+        ptr2[0] = T[0];  ptr2[1] = T[1];  ptr2[2] = 0;  ptr2[3] = T[2];
+        ptr2[4] = T[3];  ptr2[5] = T[4];  ptr2[6] = 0;  ptr2[7] = T[5];
+        ptr2[8] = 0;     ptr2[9] = 0;     ptr2[10] = 1; ptr2[11] = 0;
+        ptr2[12] = T[6]; ptr2[13] = T[7]; ptr2[14] = 0; ptr2[15] = T[8];
+        return py::make_tuple(T_, inliers_);
+    }
+}
+
 py::tuple findRigidTransformation(
 	py::array_t<double>  correspondences_,
 	py::array_t<double>  probabilities_,
@@ -397,12 +551,12 @@ py::tuple findHomography(
     
     return py::make_tuple(H_,inliers_);
                          }
-PYBIND11_PLUGIN(pymagsac) {
+PYBIND11_PLUGIN(pymagsac_extra) {
                                                                              
-    py::module m("pymagsac", R"doc(
+    py::module m("pymagsac_extra", R"doc(
         Python module
         -----------------------
-        .. currentmodule:: pymagsac
+        .. currentmodule:: pymagsac_extra
         .. autosummary::
            :toctree: _generate
            
@@ -452,6 +606,29 @@ PYBIND11_PLUGIN(pymagsac) {
         py::arg("min_iters") = 50,
         py::arg("max_iters") = 1000,
         py::arg("partition_num") = 5);
+
+    m.def("findRobust2DRigidTransformation", &findRobust2DRigidTransformation, R"doc(some doc)doc",
+        py::arg("correspondences"),
+        py::arg("probabilities"),
+		py::arg("sampler") = 4,
+        py::arg("update_sampling") = false,
+        py::arg("use_magsac_plus_plus") = true,
+        py::arg("sigma_th") = 1.0,
+        py::arg("conf") = 0.99,
+        py::arg("min_iters") = 50,
+        py::arg("max_iters") = 1000,
+        py::arg("check_edges_similarity") = false,
+        py::arg("edges_similarity_threshold") = 0.9,
+        py::arg("check_min_edges_length") = false,
+        py::arg("min_edges_length_threshold") = 0.1,
+        py::arg("apply_rotation_boundaries") = false,
+        py::arg("rotation_boundaries") = py::array_t<float>(),
+        py::arg("apply_translation_boundary") = false,
+        py::arg("translation_init") = py::array_t<float>(),
+        py::arg("translation_boundary") = 99999.99,
+        py::arg("core_num") = 1,
+        py::arg("partition_num") = 5,
+        py::arg("reduced_matrix") = false);
 
     m.def("findRigidTransformation", &findRigidTransformation, R"doc(some doc)doc",
         py::arg("correspondences"),
